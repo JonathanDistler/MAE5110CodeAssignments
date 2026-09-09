@@ -174,57 +174,103 @@ def calculate_convergence(params, timestep, sim_time, initial_omega, num_contact
 
     return np.array(theta_dot_pos)
 
+# REGION OF ATTRACTION ARRAYS
+limit_theta = []
+limit_omega = []
+
+standstill_theta = []
+standstill_omega = []
 
 # ATTRACTOR CLASSIFICATION
-def classify_initial_condition(initial_state, params, timestep, sim_time, omega_tolerance=0.02):
+def classify_initial_condition(initial_state, params, timestep, sim_time, omega_tolerance=0.005):
 
-    (time_result, state_result, theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(model.dynamics, model.is_touching, model.reset_params, initial_state, timestep, sim_time, params, num_contacts=None)
+    (time_result, state_result, theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(
+        model.dynamics,
+        model.is_touching,
+        model.reset_params,
+        initial_state,
+        timestep,
+        sim_time,
+        params,
+        num_contacts=None
+    )
 
-    omega_fixed = calculate_fixed_point(params)
+    # Need at least three contacts to determine whether the angular velocity has converged
+    if len(theta_dot_pos) < 3:
+        return 0
 
-    # ROLLING LIMIT CYCLE
-    if (len(theta_dot_pos) >= 5 and np.isfinite(omega_fixed)):
+    # Store the post-impact angular velocities
+    omega_values = np.array(theta_dot_pos)
 
-        recent_velocities = np.array(theta_dot_pos[-5:])
+    # Check the final three post-impact angular velocities
+    recent_velocities = omega_values[-3:]
 
-        if np.all(np.abs(recent_velocities- omega_fixed)< omega_tolerance):
-            return 1 #means its rolling
+    # Determine whether the final three velocities are close to one another
+    if np.max(recent_velocities) - np.min(recent_velocities) < omega_tolerance:
 
-    # NON-WALKING / FALLING
+        # Make sure the walker is moving forward
+        if recent_velocities[-1] > 0:
+            return 1
+
+    # Standstill/didn't meet conditions for rolling 
     return 0
 
 # REGION OF ATTRACTION
 def calculate_roa(params, timestep, sim_time, theta_values, omega_values):
 
-    roa = np.zeros((len(omega_values), len(theta_values)))
+    #had to look up, just makes it so that they aren't writing on top of everthing else
+    global limit_theta, limit_omega
+    global standstill_theta, standstill_omega
+
+    # Clear the arrays before running the RoA calculation
+    limit_theta = []
+    limit_omega = []
+
+    standstill_theta = []
+    standstill_omega = []
 
     for i, omega in enumerate(omega_values):
 
         print(f"RoA row {i + 1}/{len(omega_values)}")
 
         for j, theta in enumerate(theta_values):
-            initial_state = np.array([theta, omega])
-            roa[i, j] = classify_initial_condition(initial_state, params, timestep,sim_time)
 
-    return roa
+            # Initial condition for this simulation
+            initial_state = np.array([theta, omega])
+
+            # Run one simulation from this initial condition
+            classification = classify_initial_condition(
+                initial_state,
+                params,
+                timestep,
+                sim_time
+            )
+
+            # Store the initial condition based on its final behavior
+            if classification == 1:
+                #adds both ICS to a list for rolling motion (limit cycle)
+                limit_theta.append(theta)
+                limit_omega.append(omega)
+
+            else:
+                #adds both ICs to a list for stopping motion
+                standstill_theta.append(theta)
+                standstill_omega.append(omega)
+
 
 # PLOT REGION OF ATTRACTION
-def plot_roa(theta_values,omega_values, roa,params,limit_cycle=None):
+def plot_roa(params):
 
     gamma = params["gamma"]
-
     plt.figure()
-    plt.plot(theta_values, omega_values, linewidth=2, label="Rolling limit cycle")
-    plt.xlabel(r"$\theta$ [rad]")
-    plt.ylabel(r"$\dot{\theta}$ [rad/s]")
-    plt.title(f"Region of Attraction, N = {params['N']}, $\\gamma$ = {np.degrees(gamma):.1f}$^\\circ$")
-    if limit_cycle is not None:
-        plt.plot(limit_cycle[0], limit_cycle[1], linewidth=2.5, label="Rolling limit cycle")
-        plt.scatter(limit_cycle[0, 0], limit_cycle[1, 0], s=70, label="Post-impact fixed point")
-        plt.legend()
+    plt.scatter(limit_theta, limit_omega, color="blue", s=15, label="Rolling limit cycle")
+    plt.scatter(standstill_theta, standstill_omega, color="red", s=15, label="Standstill")
+    plt.xlabel("Theta (rad)")
+    plt.ylabel("Omega (rad/s)")
+    plt.title(f"Region of Attraction for gamma={np.degrees(gamma):.1f}°")
+    plt.legend()
     plt.grid(True)
-    plt.tight_layout()
-    plt.savefig("assignment_1_graphs/RoA_N6_g30.png", dpi=300, bbox_inches="tight")
+    plt.savefig("assignment_1_graphs/roa_plot.png", dpi=300, bbox_inches="tight")
     plt.show()
 
 
@@ -264,7 +310,11 @@ def inclination_sweep(params, gamma_values, timestep, sim_time):
 
         #calculates region of attraction 
         roa = calculate_roa(sweep_params, timestep, sim_time, theta_values, omega_values)
-        roa_fraction = np.mean(roa == 1)
+        total_point=len(limit_theta)+len(standstill_theta)
+        if total_point > 0:
+            roa_fraction = len(limit_theta) / total_point
+        else:
+            roa_fraction = 0.0
         roa_sizes.append(roa_fraction)
 
     return np.array(roa_sizes), np.array(floquet_values)
@@ -306,7 +356,11 @@ def spoke_sweep(params, spoke_values, timestep, sim_time):
         omega_values = np.linspace(0, omega_max, 35)
 
         roa = calculate_roa(sweep_params,timestep,sim_time,theta_values, omega_values)
-        roa_fraction = np.mean(roa == 1)
+        total_point=len(limit_theta)+len(standstill_theta)
+        if total_point > 0:
+            roa_fraction = len(limit_theta) / total_point
+        else:   
+            roa_fraction = 0.0
         roa_sizes.append(roa_fraction)
 
     return np.array(roa_sizes), np.array(floquet_values)
@@ -459,14 +513,19 @@ if __name__ == "__main__":
 
     # REGION OF ATTRACTION
     theta_values = np.linspace(gamma - alpha, gamma + alpha, 50)
-    omega_values_roa = np.linspace(0, max(3.0, 1.5 * omega_fixed), 50)
+    omega_values_roa = np.linspace(-2*np.pi, 2*np.pi, 50)
 
     print("REGION OF ATTRACTION")
     roa = calculate_roa(params, timestep, sim_time, theta_values, omega_values_roa)
 
-    plot_roa(theta_values, omega_values_roa, roa, params, limit_cycle=limit_cycle)
+    plot_roa(params)
 
-    roa_fraction = np.mean(roa == 1)
+    total_point=len(limit_theta)+len(standstill_theta)
+
+    if total_point > 0:
+        roa_fraction = len(limit_theta) / total_point
+    else:
+        roa_fraction = 0.0
 
     print(f"Rolling limit-cycle RoA fraction = {roa_fraction:.4f}")
 

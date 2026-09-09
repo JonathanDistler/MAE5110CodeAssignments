@@ -10,14 +10,28 @@ wsl
 git clone https://github.com/JonathanDistler/MAE5110CodeAssignments.git
 
 cd MAE5110CodeAssignments
+```
 
+After installing *uv* as the environment manager, synchronize the project environment:
+```bash
 uv sync --python 3.14
 ```
 
-Then,
+Then, run the assignment:
 
 ```bash
-python assignment_1.py
+uv run python assignment_1.py
+```
+
+As a side note, if someone has already cloned the repository previously, they need to run:
+```bash
+cd MAE5110CodeAssignments
+
+git pull
+
+uv sync --python 3.14
+
+uv run python assignment_1.py
 ```
 
 The sanity checks were implemented before the actual `assignment_1.py`, and the corresponding assignment was built on top of much of its functionality. The first sanity check was to plot time versus $\theta$ and time versus $\dot{\theta}$ for a well-studied case consisting of a 6-spoke rimless wheel on a 30-degree incline. I expected the system to exhibit cyclical motion corresponding to a stable rolling gait, much like the moon-stepper. The resulting plots showed the expected cyclical behavior, which indicated that the original dynamical derivation and numerical implementation were working as intended.
@@ -62,25 +76,17 @@ As seen in the graphs, all of the inclines produced similar (and small) Floquet 
 
 More permutations of inclination, number of spokes, and initial conditions could be considered at a great computational cost, but they all highlight the following: a system will only walk forward if
 
-$$
-\dot{\theta} > \omega_1
-=
-\sqrt{
-2\frac{g}{l}
-\left(
-1-\cos(\gamma-\alpha)
-\right)
-},
-$$
+$\dot{\theta} > \omega_1=\sqrt{2\frac{g}{l}\left(1-\cos(\gamma-\alpha)\right)},$
 
 with $\alpha$ defined as
 
-$$
-\alpha=\frac{\pi}{N}.
-$$
+$\alpha=\frac{\pi}{N}$
 
 As an aside, the return map is undefined in some specific instances because the wheel will end up at $\theta=\dot{\theta}=0$ [Underactuated Robotics](https://underactuated.csail.mit.edu/simple_legs.html?utm_source=chatgpt.com#Coleman98a)
  
 <img src="assignment_1_graphs/floquet_mult_vs_inclination.png" width="500">
 
 <img src="assignment_1_graphs/floquet_vs_num_spokes.png" width="500">
+
+## Questions for the Reviewer
+I have a few points of contention in regards to my code base. Primarily, I'm concerned about the Region of Attraction (RoA) calculations; I had been comparing the last three angualr velocities (post-impact) to see if the two further apart were below a tolerance threshold. I wasn't sure if this was the same methodology that was recommended, if my tolerances were too tight, and the means to verify a reasonable tolerance from numerically introduced friction. The next question I had was whether or not there was a way to matricize the code or use add-ons that made the code run quicker. I had deduced a .001 s time-step from tests that monitored $\Delta\dot{\theta}$ to determine the point at which the numerical solution began to diverge, however, I think that I chose too small of a time-step. Finally, what is a reasonable space to test the RoA over; $\theta$ is bounded physically from [$-2\pi$, $2\pi$], however, $\dot{\theta}$ doesn't seem to have a bound. Are there any considerations for choosing an appropriate $\dot{\theta}$? 
