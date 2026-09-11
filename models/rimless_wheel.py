@@ -1,6 +1,7 @@
 import numpy as np
 
 def generate_params():
+    #I found it most useful to have gravity, length, mass, damping coeff, N, gamma, then alpha can be derived from those
     params = {
         "gravity": 9.8,  # gravity m/s^2)
         "length": 1,  # rod length (m)
@@ -15,26 +16,43 @@ def dynamics(t, state, params):
     """Continuous-time stance dynamics: theta_ddot = (g/l) sin(theta)."""
     g = params["gravity"]
     l = params["length"]
+    #seem to be missing a few parameters (e.g. mass, N, gamma)
 
     theta, theta_dot = state
     theta_ddot = (g / l) * np.sin(theta)
-
+    #not necessarily the correct angular_acceleration, I had the:
+    """
+    theta_double_dot = (
+        mass * gravity * length * np.sin(angle) #fixed this term to include theta-gamma
+        - damping_coeff * angular_velocity  # <-- DAMPING TERM
+    ) / (mass * length**2)
+    """
+    #good return
     return np.array([theta_dot, theta_ddot])
 
+#I think guard is too generic, maybe a "better" naming convention
 def guard(state, params):
     gamma = params["slope_angle"]
     alpha = params["half_spoke_angle"]
     theta = state[0]
 
+    #for my return, I found it convenient to use a boolean of theta>=gamma+alpha
+    #the guard should return a boolean not a float
     return theta - (gamma + alpha)
 
+#I had included 2 helper functions: is_touching and reset_params
 
 def reset(state, params):
+    #should ideally require the number of legs in some way
+    #can explicitly solve for two_alpha and alpha here. . . alpha shouldn't be a parameter
     gamma = params["slope_angle"]
     alpha = params["half_spoke_angle"]
     theta_dot = state[1]
 
+    #I found it more convenient to use plus and minus with theta to represent the limit, but this gets point across
+    #"theta_next" should be theta_minus - two_alpha
     theta_next = gamma - alpha
+    #I would represent theta_dot with an easier to track name (e.g. theta_minus) - but this is the correct dynamics 
     theta_dot_next = theta_dot * np.cos(2 * alpha)
 
     return np.array([theta_next, theta_dot_next])
@@ -45,7 +63,10 @@ def reset(state, params):
 
 
 
-
+#This looks to be more along the right lines, I would say that it probably isn't 
+#super helpful to look on a case by case basis, rather define systems that won't rotate
+#based on underactuated page on MIT, there are some good resources on fixed points and walking thresholds
+#then, the rest will follow some trajectory, and when coupled with a number of contacts threshold, the code will be in a very good state
 
 
 #def dynamics(t, state_current, params):
