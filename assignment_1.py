@@ -23,6 +23,7 @@ sim_time = 20
 num_contacts = 50
 initial_state = np.array([np.pi / 4, 0.0])
 timestep = 0.001 #determined empirically from theta-dot(plus)-theta-dot(minus) for a step to see when it diverges
+timestep_upper_bound = .04159 #for the pendulum, this was the highest timestep that conserved energy - will use this delta t when far from poincare section
 
 # GEOMETRY
 N = params["N"]
@@ -92,7 +93,7 @@ def calculate_limit_cycle(params,timestep, sim_time):
     initial_state = np.array([gamma - alpha, omega_fixed])
 
     # Simulate until the next impact
-    (time_result, state_result, theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(model.dynamics, model.is_touching, model.reset_params, initial_state, timestep, sim_time, params, num_contacts=1)
+    (time_result, state_result, theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(model.dynamics, model.is_touching, model.reset_params, initial_state, timestep, timestep_upper_bound, sim_time, params, num_contacts=1, theta_tolerance=0.05)
 
     theta_tolerance=.02
     omega_tolerance=.02
@@ -122,7 +123,7 @@ def return_map(omega_initial, params, timestep, sim_time):
     # Start immediately after the impact provides a new state to create return map 
     initial_state = np.array([gamma - alpha, omega_initial])
 
-    (time_result, state_result,theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(model.dynamics, model.is_touching, model.reset_params, initial_state, timestep, sim_time, params, num_contacts=1)
+    (time_result, state_result,theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(model.dynamics, model.is_touching, model.reset_params, initial_state, timestep, timestep_upper_bound, sim_time, params, num_contacts=1, theta_tolerance=0.05)
 
     if len(theta_dot_pos) == 0:
         return np.nan
@@ -131,7 +132,7 @@ def return_map(omega_initial, params, timestep, sim_time):
     return theta_dot_pos[0]
 
 # RETURN MAP DATA
-def calculate_return_map(params, timestep, sim_time, omega_min=0.1, omega_max=3.5, num_points=100):
+def calculate_return_map(params, timestep, sim_time, omega_min=0.1, omega_max=3.5, num_points=60):
 
     omega_values = np.linspace(omega_min, omega_max, num_points)
 
@@ -170,7 +171,7 @@ def calculate_convergence(params, timestep, sim_time, initial_omega, num_contact
     gamma = params["gamma"]
     alpha = np.pi / N
     initial_state = np.array([gamma - alpha, initial_omega])
-    (time_result, state_result, theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(model.dynamics, model.is_touching, model.reset_params, initial_state, timestep, sim_time, params, num_contacts=num_contacts)
+    (time_result, state_result, theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(model.dynamics, model.is_touching, model.reset_params, initial_state, timestep, timestep_upper_bound, sim_time, params, num_contacts=num_contacts, theta_tolerance=0.05)
 
     return np.array(theta_dot_pos)
 
@@ -185,15 +186,7 @@ standstill_omega = []
 def classify_initial_condition(initial_state, params, timestep, sim_time, omega_tolerance=0.005):
 
     (time_result, state_result, theta_dot_pos, contact_indices, pre_impact_states, post_impact_states) = integrate(
-        model.dynamics,
-        model.is_touching,
-        model.reset_params,
-        initial_state,
-        timestep,
-        sim_time,
-        params,
-        num_contacts=None
-    )
+model.dynamics, model.is_touching, model.reset_params, initial_state, timestep, timestep_upper_bound, sim_time, params, num_contacts=None, theta_tolerance=0.05)
 
     # Need at least three contacts to determine whether the angular velocity has converged
     if len(theta_dot_pos) < 3:
@@ -296,7 +289,7 @@ def inclination_sweep(params, gamma_values, timestep, sim_time):
 
         alpha = np.pi / N
 
-        theta_values = np.linspace(gamma - alpha, gamma + alpha,35)
+        theta_values = np.linspace(gamma - alpha, gamma + alpha,11)
         omega_fixed = calculate_fixed_point(sweep_params)
         if np.isfinite(omega_fixed):
 
@@ -306,7 +299,7 @@ def inclination_sweep(params, gamma_values, timestep, sim_time):
 
             omega_max = 3.0
 
-        omega_values = np.linspace(0, omega_max, 35)
+        omega_values = np.linspace(0, omega_max, 11)
 
         #calculates region of attraction 
         roa = calculate_roa(sweep_params, timestep, sim_time, theta_values, omega_values)
@@ -341,7 +334,7 @@ def spoke_sweep(params, spoke_values, timestep, sim_time):
         gamma = sweep_params["gamma"]
         alpha = np.pi / N
 
-        theta_values = np.linspace(gamma - alpha, gamma + alpha, 35)
+        theta_values = np.linspace(gamma - alpha, gamma + alpha, 11)
 
         omega_fixed = calculate_fixed_point(sweep_params)
 
@@ -353,7 +346,7 @@ def spoke_sweep(params, spoke_values, timestep, sim_time):
 
             omega_max = 3.0
 
-        omega_values = np.linspace(0, omega_max, 35)
+        omega_values = np.linspace(0, omega_max, 11)
 
         roa = calculate_roa(sweep_params,timestep,sim_time,theta_values, omega_values)
         total_point=len(limit_theta)+len(standstill_theta)
@@ -512,8 +505,8 @@ if __name__ == "__main__":
         plt.show()
 
     # REGION OF ATTRACTION
-    theta_values = np.linspace(gamma - alpha, gamma + alpha, 50)
-    omega_values_roa = np.linspace(-2*np.pi, 2*np.pi, 50)
+    theta_values = np.linspace(gamma - alpha, gamma + alpha, 25)
+    omega_values_roa = np.linspace(-2*np.pi, 2*np.pi, 25)
 
     print("REGION OF ATTRACTION")
     roa = calculate_roa(params, timestep, sim_time, theta_values, omega_values_roa)
