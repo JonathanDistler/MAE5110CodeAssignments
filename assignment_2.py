@@ -708,7 +708,7 @@ print("BEGINNING POINCARE SEARCH")
 # Final grid resolution selected from assignment_2_grid_test.py
 # The resolution study compares successive grid resolutions and identifies the coarsest resolution with sufficiently small changes in the Poincare map
 # Had originally been having faults with too poor of a grid resolution (101) near the RoA boundary, so redid the search
-theta_dot_grid=np.linspace(0,np.sqrt(2*params["gravity"]/params["length"]),201) #much bigger factor in fidelity of grid! 
+theta_dot_grid=np.linspace(0,np.sqrt(2*params["gravity"]/params["length"]),191) #much bigger factor in fidelity of grid! 
 alpha_grid=np.linspace(np.pi/8,np.pi/7,11)
 
 poincare_table=build_poincare_table(theta_dot_grid,alpha_grid,params,timestep=timestep,print_progress=True)
