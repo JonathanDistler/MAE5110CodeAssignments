@@ -51,7 +51,9 @@ def feedback_linearization_controller(state, params, kp=240, kd=80):
     desired_acceleration=-kp*theta-kd*theta_dot
     required_torque=(mass*length**2*desired_acceleration - mass*gravity*length*np.sin(theta) + damping*theta_dot)
 
-    return required_torque
+    __, __, tau_min, tau_max=get_control_bounds(params)
+
+    return np.clip(required_torque, tau_min, tau_max)
 
 
 # POINCARE SECTION
@@ -176,18 +178,24 @@ def capture_bounds(theta, params):
 
     return lower, upper
 
-#Determines bounds of RoA
+#Determines bounds of RoA by simulating the bounded balancing controller
 def in_RoA_helper(state, params):
-    theta, theta_dot = state
-    lower, upper = capture_bounds(theta, params)
-    angle_limit = params["incline"] + np.pi / 7
+    state=np.array(state,dtype=float,copy=True)
+    lower, upper=capture_bounds(state[0],params)
+    angle_limit=params["incline"]+np.pi/7
+    valid=(np.abs(state[0]) <= angle_limit) & (state[1] > lower) & (state[1] < upper)
+    step_params=params.copy()
+    roa_timestep=0.002
 
-    return (abs(theta) <= angle_limit and theta_dot > lower and theta_dot < upper)
+    for i in range(3000):
+        step_params["ankle_torque"]=feedback_linearization_controller(state,step_params,kp=kp,kd=kd)
+        state=state+roa_timestep*model.evaluate_dynamics(0,state,step_params)
+        valid=valid & (np.abs(state[0]) <= angle_limit)
 
-for i, theta_dot in enumerate(theta_dot_grid_roa):
-    for j, theta in enumerate(theta_grid):
-        state=np.array([theta, theta_dot])
-        roa_grid[i,j]=in_RoA_helper(state, params)
+    return valid & (np.abs(state[0]) < 0.001) & (np.abs(state[1]) < 0.001)
+
+theta_mesh, theta_dot_mesh=np.meshgrid(theta_grid,theta_dot_grid_roa)
+roa_grid[:]=in_RoA_helper(np.array([theta_mesh,theta_dot_mesh]),params)
 
 number_roa_states=np.sum(roa_grid)
 number_total_states=roa_grid.size
@@ -213,8 +221,14 @@ plt.close(fig)
 
 # RoA LOOKUP FUNCTION
 def state_is_in_roa(state, params):
-    #use the actual continuous state instead of the nearest RoA grid point
-    return in_RoA_helper(state, params)
+    #Reject states outside the capture bounds before testing the actual controller
+    theta, theta_dot=state
+    lower, upper=capture_bounds(theta,params)
+
+    if not (abs(theta) <= params["incline"]+np.pi/7 and lower < theta_dot < upper):
+        return False
+
+    return bool(in_RoA_helper(state, params))
 
 
 def poincare_state_is_in_roa(theta_dot):
@@ -597,37 +611,78 @@ def plot_poincare_trajectory(poincare_history, output_path, title):
 # GENERATE WALKING GIF
 def generate_walking_gif(initial_state,alpha_history,params,output_path,timestep=1e-4):
 
-    if len(alpha_history) == 0:
-        return False
-
+    params=params.copy()
+    params["ankle_torque"]=0.0
     visualization_states=[]
+    visualization_params=[]
     state=initial_state.copy()
     visualization_states.append(state.copy())
-    frame_skip=50
+    visualization_params.append(params.copy())
+    frame_skip=75
+    frame_counter=0
+    balancing=state_is_in_roa(state,params)
 
     for step, alpha in enumerate(alpha_history):
+        if balancing:
+            break
+
         params["angle_of_attack"]=alpha
         params["ankle_torque"]=0.0
         gamma=params["incline"]
         theta_td=gamma+alpha
         max_steps=20000
-        frame_counter=0
 
         for i in range(max_steps):
             next_state=(state+timestep*model.evaluate_dynamics(0,state,params))
+            roa_state, entered_roa=check_roa_entry(state,next_state,params)
 
-            if frame_counter % frame_skip == 0:
-                visualization_states.append(next_state.copy())
+            if entered_roa:
+                state=roa_state
+                balancing=True
+                break
+
+            touchdown=(state[0] < theta_td and next_state[0] >= theta_td)
+
+            if touchdown:
+                touchdown_state=interpolate_state(state,next_state,theta_td)
+                state=model.event_dynamics(touchdown_state,params)
+                balancing=state_is_in_roa(state,params)
+            else:
+                state=next_state
 
             frame_counter+=1
 
-            if (state[0] < theta_td and next_state[0] >= theta_td):
-                touchdown_state=interpolate_state(state,next_state,theta_td)
-                state=model.event_dynamics(touchdown_state,params)
+            if frame_counter % frame_skip == 0:
                 visualization_states.append(state.copy())
+                visualization_params.append(params.copy())
+
+            if touchdown:
                 break
 
-            state=next_state
+    #Finish the last stance and latch the ankle controller on at RoA entry
+    for i in range(int(8.0/timestep)):
+        if not balancing:
+            balancing=state_is_in_roa(state,params)
+
+        if balancing:
+            params["ankle_torque"]=feedback_linearization_controller(state,params,kp=kp,kd=kd)
+        else:
+            params["ankle_torque"]=0.0
+
+        next_state=state+timestep*model.evaluate_dynamics(0,state,params)
+
+        if not balancing and model.event_guard(state,next_state,params):
+            break
+
+        state=next_state
+        frame_counter+=1
+
+        if frame_counter % frame_skip == 0:
+            visualization_states.append(state.copy())
+            visualization_params.append(params.copy())
+
+        if balancing and np.max(np.abs(state)) < 1e-5:
+            break
 
     if len(visualization_states) <= 1:
         return False
@@ -636,7 +691,7 @@ def generate_walking_gif(initial_state,alpha_history,params,output_path,timestep
 
     def update(frame):
         ax.clear()
-        model.visualize(visualization_states[frame],params,ax=ax)
+        model.visualize(visualization_states[frame],visualization_params[frame],ax=ax)
         ax.set_title(f"Walking frame {frame+1}/{len(visualization_states)}")
 
     animation=FuncAnimation(fig,update,frames=len(visualization_states),interval=20)
@@ -700,24 +755,7 @@ else:
 # RUN MINIMUM-STEP POLICY FROM THE ORIGINAL INITIAL CONDITION
 print("BEGINNING ORIGINAL MINIMUM-STEP WALKING SIMULATION")
 
-(
-    state_history,
-    alpha_history,
-    poincare_history,
-    completed_steps,
-    reached_roa
-) = simulate_policy(
-    initial_state,
-    params,
-    theta_dot_grid,
-    alpha_grid,
-    policy_alpha,
-    steps_to_roa,
-    maximum_steps_to_roa,
-    max_walking_steps=max_walking_steps,
-    timestep=timestep,
-    use_max_policy=False
-)
+(state_history, alpha_history, poincare_history, completed_steps, reached_roa) = simulate_policy(initial_state, params, theta_dot_grid, alpha_grid, policy_alpha, steps_to_roa, maximum_steps_to_roa, max_walking_steps=max_walking_steps, timestep=timestep, use_max_policy=False)
 
 print("ORIGINAL MINIMUM-STEP WALKING RESULT")
 print(f"Initial theta_dot = {initial_state[1]:.6f} rad/s")
