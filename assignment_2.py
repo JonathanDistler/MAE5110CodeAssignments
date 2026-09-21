@@ -18,7 +18,7 @@ params = {
     "damping_coeff": 0.0 # damping coefficient (kg*m^2/s)
 }
 
-initial_state = np.array([0.0, 3.0])
+initial_state = np.array([0.0, 4.0])
 timestep = 1e-4
 sim_time = 3.0
 
@@ -37,9 +37,8 @@ def get_control_bounds(params):
 
     return angle_of_attack_min, angle_of_attack_max, tau_min, tau_max
 
-
 # BALANCING CONTROLLER
-def feedback_linearization_controller(state, params, kp=2.0, kd=0.5):
+def feedback_linearization_controller(state, params, kp=240, kd=80):
     #feedback-linearization controller with desired closed-loop dynamics
     length=params["length"]
     mass=params["mass"]
@@ -55,24 +54,13 @@ def feedback_linearization_controller(state, params, kp=2.0, kd=0.5):
     return required_torque
 
 
-# RoA
-def in_RoA_helper(state, params, kp=2.0, kd=0.5):
-
-    required_torque=feedback_linearization_controller(state, params, kp=kp, kd=kd)
-    _, _, tau_min, tau_max=get_control_bounds(params)
-
-    #state is inside the balancing RoA if the required controller torque is achievable
-    return tau_min <= required_torque <= tau_max
-
-
 # POINCARE SECTION
 def poincare_section_event(prev_state, next_state, params):
 
     theta_prev=prev_state[0]
     theta_next=next_state[0]
 
-    #defines the poincare section as passing through the vertical upright position
-    #walker leaves at theta<0 and moves towards theta>0
+    # Poincare section is theta = 0, crossing from theta < 0 toward theta > 0; States on this section have the form [0, theta_dot]
     return (theta_prev < 0 and theta_next >= 0)
 
 
@@ -110,7 +98,7 @@ def poincare_map(theta_dot, alpha, params, timestep=1e-4):
     touchdown_found=False
 
     for i in range(max_steps):
-        next_state=(state + timestep*model.dynamics(0, state,step_params))
+        next_state=(state + timestep*model.evaluate_dynamics(0, state,step_params))
 
         if (state[0] < theta_td and next_state[0] >= theta_td):
             touchdown_state=interpolate_state(state, next_state, theta_td)
@@ -125,7 +113,7 @@ def poincare_map(theta_dot, alpha, params, timestep=1e-4):
 
     # FIND NEXT POINCARE SECTION
     for j in range(max_steps):
-        next_state=(state + timestep*model.dynamics(0, state, step_params))
+        next_state=(state + timestep*model.evaluate_dynamics(0, state, step_params))
 
         if poincare_section_event(state, next_state, step_params):
             section_state=interpolate_state(state, next_state, 0.0)
@@ -166,13 +154,40 @@ theta_dot_grid_roa=np.linspace(-6, 6, 121)
 roa_grid=np.zeros((len(theta_dot_grid_roa), len(theta_grid)), dtype=bool)
 
 #controller gains
-kp=2.0
-kd=0.5
+kp=240
+kd=80
+
+# fixed previous issues in RoA (had previously been just torque limits!) - from Xuyi's code after review
+def capture_bounds(theta, params):
+    # from derivation of w-dot=w (dw/dtheta) to w(dw/dtheta)=(g/l)(sin(theta)-alpha)
+    #Then, w=+/- sqrt(Fr(theta)) - with theta-left defined as -arcsin(.05) and theta-right as arcsin(.1) - from angle interval or legs
+    theta = np.asarray(theta)
+
+    q = params["gravity"] / params["length"]
+
+    left = -np.arcsin(0.05)
+    right = np.arcsin(0.1)
+
+    upper_energy = (2 * q* (np.cos(right) - np.cos(theta) + 0.1 * (right - theta)))
+    lower_energy = (2 * q* (np.cos(left) - np.cos(theta) + 0.05 * (theta - left)))
+
+    upper = (np.where(theta <= right, 1.0, -1.0)* np.sqrt(np.maximum(upper_energy, 0)))
+    lower = (np.where(theta >= left, -1.0, 1.0)* np.sqrt(np.maximum(lower_energy, 0)))
+
+    return lower, upper
+
+#Determines bounds of RoA
+def in_RoA_helper(state, params):
+    theta, theta_dot = state
+    lower, upper = capture_bounds(theta, params)
+    angle_limit = params["incline"] + np.pi / 7
+
+    return (abs(theta) <= angle_limit and theta_dot > lower and theta_dot < upper)
 
 for i, theta_dot in enumerate(theta_dot_grid_roa):
     for j, theta in enumerate(theta_grid):
         state=np.array([theta, theta_dot])
-        roa_grid[i,j]=in_RoA_helper(state, params, kp=kp, kd=kd)
+        roa_grid[i,j]=in_RoA_helper(state, params)
 
 number_roa_states=np.sum(roa_grid)
 number_total_states=roa_grid.size
@@ -192,14 +207,14 @@ ax.axhline(0, linestyle="--")
 ax.set_xlabel(r"$\theta$ (rad)")
 ax.set_ylabel(r"$\dot{\theta}$ (rad/s)")
 ax.set_title("Balancing Controller Region of Attraction")
-fig.savefig(output_dir / "01_balancing_roa.png", dpi=300)
+fig.savefig(output_dir / "balancing_roa.png", dpi=300)
 plt.close(fig)
 
 
 # RoA LOOKUP FUNCTION
 def state_is_in_roa(state, params):
     #use the actual continuous state instead of the nearest RoA grid point
-    return in_RoA_helper(state, params, kp=kp, kd=kd)
+    return in_RoA_helper(state, params)
 
 
 def poincare_state_is_in_roa(theta_dot):
@@ -279,7 +294,7 @@ def build_maximum_steps(theta_dot_grid, alpha_grid, poincare_table, max_horizon=
         if poincare_state_is_in_roa(theta_dot):
             maximum_steps_to_roa[i]=0
 
-    #The horizon is intentionally finite so that cycles do not create an artificial infinity. The result therefore means the longest route found within max_horizon walking steps.
+    #The horizon is intentionally finite so that cycles do not create an artificial infinity. The result therefore means the longest route found within max_horizon walking steps
     for horizon in range(1,max_horizon+1):
         previous_maximum_steps=maximum_steps_to_roa.copy()
         new_maximum_steps=maximum_steps_to_roa.copy()
@@ -360,49 +375,86 @@ def interpolated_steps_to_roa(theta_dot, theta_dot_grid, steps_to_roa):
 
     return int(interpolated_steps+0.5)
 
+#checks if RoA entered mid-step; step is small enough that it likely won't happen, but would be a good sanity check 
+def check_roa_entry(previous_state, next_state, params):
+    # Returns (state, True) if RoA entered, (None, False) if not
+
+    previous_in_roa = state_is_in_roa(previous_state, params)
+    next_in_roa = state_is_in_roa(next_state, params)
+
+    if previous_in_roa:
+        return previous_state.copy(), True
+
+    if next_in_roa:
+        return next_state.copy(), True
+
+    return None, False
+
 
 # WALK ONE STEP
 def integrate_to_touchdown(state, alpha, params, timestep=1e-4):
 
-    step_params=params.copy()
-    step_params["angle_of_attack"]=alpha
-    step_params["ankle_torque"]=0.0
-    gamma=step_params["incline"]
-    theta_td=gamma+alpha
-    max_steps=20000
+    step_params = params.copy()
+    step_params["angle_of_attack"] = alpha
+    step_params["ankle_torque"] = 0.0
+
+    gamma = step_params["incline"]
+    theta_td = gamma + alpha
+    max_steps = 20000
+
+    if state_is_in_roa(state, params):
+        return state.copy(), True
 
     for i in range(max_steps):
-        next_state=(state+timestep*model.dynamics(0,state,step_params))
 
-        if (state[0] < theta_td and next_state[0] >= theta_td):
-            touchdown_state=interpolate_state(state,next_state,theta_td)
-            return model.event_dynamics(touchdown_state,step_params)
+        next_state = (state + timestep * model.evaluate_dynamics(0, state, step_params))
 
-        state=next_state
+        # Check for RoA entry during the continuous integration
+        roa_state, entered_roa = check_roa_entry(state, next_state, params)
 
-    return None
+        if entered_roa:
+            return roa_state, True
+
+        # Checks for touchdown event
+        if state[0] < theta_td and next_state[0] >= theta_td:
+            touchdown_state = interpolate_state(state, next_state, theta_td)
+            return (model.event_dynamics(touchdown_state, step_params), False)
+
+        state = next_state
+
+    return None, False
 
 
 def integrate_to_poincare(state, params, timestep=1e-4):
+    step_params = params.copy()
+    step_params["ankle_torque"] = 0.0
 
-    step_params=params.copy()
-    step_params["ankle_torque"]=0.0
-    max_steps=20000
+    if state_is_in_roa(state, params):
+        return state.copy(), True
+
+    max_steps = 20000
 
     for i in range(max_steps):
-        next_state=(state+timestep*model.dynamics(0,state,step_params))
+        next_state = (state + timestep * model.evaluate_dynamics(0, state, step_params))
 
-        if poincare_section_event(state,next_state,step_params):
-            section_state=interpolate_state(state,next_state,0.0)
+        # Check for RoA entry during the continuous integration
+        roa_state, entered_roa = check_roa_entry(state, next_state, params)
+
+        if entered_roa:
+            return roa_state, True
+
+        # Check for the next Poincare section
+        if poincare_section_event(state, next_state, step_params):
+            section_state = interpolate_state(state, next_state, 0.0)
 
             if section_state[1] > 0:
-                return section_state
+                return section_state, False
 
-            return None
+            return None, False
 
-        state=next_state
+        state = next_state
 
-    return None
+    return None, False
 
 
 # SIMULATE A SPECIFIC POLICY
@@ -469,17 +521,32 @@ def simulate_policy(initial_state, params, theta_dot_grid, alpha_grid, policy_al
         print(f"step {step+1}: alpha = {alpha:.5f}, theta_dot = {theta_dot:.5f}")
         alpha_history.append(alpha)
 
-        touchdown_state=integrate_to_touchdown(state,alpha,params,timestep=timestep)
+        touchdown_state, entered_roa = integrate_to_touchdown(state, alpha, params, timestep=timestep)
+
+        if entered_roa:
+            state = touchdown_state.copy()
+            state_history.append(state.copy())
+            print(f"Entered RoA during walking step {step + 1}")
+
+            return (state_history, alpha_history, poincare_history, completed_steps + 1, True)
 
         if touchdown_state is None:
             print("Touchdown was not detected")
-            return (state_history,alpha_history,poincare_history,completed_steps,False)
+            return (state_history, alpha_history, poincare_history, completed_steps, False)
 
-        next_state=integrate_to_poincare(touchdown_state,params,timestep=timestep)
+        next_state, entered_roa = integrate_to_poincare(touchdown_state, params, timestep=timestep)
+
+        if entered_roa:
+            state = next_state.copy()
+            state_history.append(state.copy())
+
+            print(f"Entered RoA during walking step {step + 1}")
+
+            return (state_history, alpha_history, poincare_history, completed_steps + 1, True)
 
         if next_state is None:
             print("Next Poincare section was not detected")
-            return (state_history,alpha_history,poincare_history,completed_steps,False)
+            return (state_history, alpha_history, poincare_history, completed_steps, False)
 
         state=next_state.copy()
         state_history.append(state.copy())
@@ -492,24 +559,16 @@ def simulate_policy(initial_state, params, theta_dot_grid, alpha_grid, policy_al
     return (state_history,alpha_history,poincare_history,completed_steps,False)
 
 
-# SELECT AN INITIAL CONDITION WITH A LONG VIABLE ROUTE
-def select_three_step_initial_condition(theta_dot_grid, minimum_steps, maximum_steps):
+# SELECT AN INITIAL CONDITION THAT REQUIRES AT LEAST 3 STEPS
+def select_three_step_initial_condition(theta_dot_grid, minimum_steps):
+    candidates = np.where(minimum_steps >= 3)[0]
 
-    #First look for a state that genuinely requires at least 3 steps under the minimum-step policy.
-    candidates=np.where(minimum_steps >= 3)[0]
+    if len(candidates) == 0:
+        return None, None
 
-    if len(candidates) > 0:
-        index=candidates[np.argmax(minimum_steps[candidates])]
-        return index,"minimum"
+    index = candidates[np.argmax(minimum_steps[candidates])]
 
-    #If no state requires 3 steps, find a state that has a viable route of at least 3 steps.
-    candidates=np.where(maximum_steps >= 3)[0]
-
-    if len(candidates) > 0:
-        index=candidates[np.argmax(maximum_steps[candidates])]
-        return index,"maximum"
-
-    return None,None
+    return index, "minimum"
 
 
 # PLOT WALKING TRAJECTORY
@@ -555,7 +614,7 @@ def generate_walking_gif(initial_state,alpha_history,params,output_path,timestep
         frame_counter=0
 
         for i in range(max_steps):
-            next_state=(state+timestep*model.dynamics(0,state,params))
+            next_state=(state+timestep*model.evaluate_dynamics(0,state,params))
 
             if frame_counter % frame_skip == 0:
                 visualization_states.append(next_state.copy())
@@ -591,8 +650,11 @@ def generate_walking_gif(initial_state,alpha_history,params,output_path,timestep
 # RUN MAIN ANALYSIS
 print("BEGINNING POINCARE SEARCH")
 
-theta_dot_grid=np.linspace(0,np.sqrt(2*params["gravity"]/params["length"]),81)
-alpha_grid=np.linspace(np.pi/8,np.pi/7,21)
+# Final grid resolution selected from assignment_2_grid_test.py
+# The resolution study compares successive grid resolutions and identifies the coarsest resolution with sufficiently small changes in the Poincare map
+# Had originally been having faults with too poor of a grid resolution (101) near the RoA boundary, so redid the search
+theta_dot_grid=np.linspace(0,np.sqrt(2*params["gravity"]/params["length"]),201) #much bigger factor in fidelity of grid! 
+alpha_grid=np.linspace(np.pi/8,np.pi/7,11)
 
 poincare_table=build_poincare_table(theta_dot_grid,alpha_grid,params,timestep=timestep,print_progress=True)
 print("POINCARE SEARCH COMPLETE")
@@ -620,29 +682,61 @@ print(f"Initial theta_dot = {initial_state[1]:.6f} rad/s")
 print(f"Interpolated minimum steps to RoA = {estimated_steps}")
 
 
-# FIND INITIAL CONDITION WITH AT LEAST 3 VIABLE STEPS
+# FIND INITIAL CONDITION WITH AT LEAST 3 REQUIRED STEPS
 print("SELECTING INITIAL CONDITION REQUIRING AT LEAST 3 STEPS")
-selected_index,selection_type=select_three_step_initial_condition(theta_dot_grid,steps_to_roa,maximum_steps_to_roa)
+selected_index, selection_type = select_three_step_initial_condition(theta_dot_grid, steps_to_roa)
 
 if selected_index is None:
-    selected_initial_state=None
-    print("No grid state has a viable route requiring or allowing at least 3 walking steps")
+    selected_initial_state = None
+    print("No grid state requires at least 3 walking steps")
 else:
-    selected_initial_state=np.array([0.0,theta_dot_grid[selected_index]])
+    selected_initial_state = np.array([0.0, theta_dot_grid[selected_index]])
+
     print(f"Selected theta_dot = {selected_initial_state[1]:.6f} rad/s")
     print(f"Selection basis = {selection_type}")
     print(f"Minimum steps to RoA = {steps_to_roa[selected_index]}")
     print(f"Maximum viable steps to RoA = {maximum_steps_to_roa[selected_index]}")
 
-
 # RUN MINIMUM-STEP POLICY FROM THE ORIGINAL INITIAL CONDITION
-print("BEGINNING MINIMUM-STEP WALKING SIMULATION")
-(state_history,alpha_history,poincare_history,completed_steps,reached_roa)=simulate_policy(initial_state,params,theta_dot_grid,alpha_grid,policy_alpha,steps_to_roa,maximum_steps_to_roa,max_walking_steps=max_walking_steps,timestep=timestep)
+print("BEGINNING ORIGINAL MINIMUM-STEP WALKING SIMULATION")
 
-print("MINIMUM-STEP WALKING RESULT")
+(
+    state_history,
+    alpha_history,
+    poincare_history,
+    completed_steps,
+    reached_roa
+) = simulate_policy(
+    initial_state,
+    params,
+    theta_dot_grid,
+    alpha_grid,
+    policy_alpha,
+    steps_to_roa,
+    maximum_steps_to_roa,
+    max_walking_steps=max_walking_steps,
+    timestep=timestep,
+    use_max_policy=False
+)
+
+print("ORIGINAL MINIMUM-STEP WALKING RESULT")
+print(f"Initial theta_dot = {initial_state[1]:.6f} rad/s")
 print(f"Number of walking steps = {completed_steps}")
 print(f"Interpolated predicted steps = {estimated_steps}")
 print(f"Reached balancing RoA = {reached_roa}")
+
+
+# RUN MINIMUM-STEP POLICY FROM THE SELECTED 3+ STEP INITIAL CONDITION
+if selected_initial_state is not None:
+    print("BEGINNING SELECTED MINIMUM-STEP WALKING SIMULATION")
+
+    (selected_min_history, selected_min_alpha_history, selected_min_poincare_history, selected_min_completed_steps, selected_min_reached_roa) = simulate_policy(selected_initial_state, params, theta_dot_grid, alpha_grid, policy_alpha, steps_to_roa, maximum_steps_to_roa, max_walking_steps=max_walking_steps, timestep=timestep, use_max_policy=False)
+
+    print("SELECTED MINIMUM-STEP WALKING RESULT")
+    print(f"Initial theta_dot = {selected_initial_state[1]:.6f} rad/s")
+    print(f"Number of walking steps = {selected_min_completed_steps}")
+    print(f"Lookup-table minimum steps = {steps_to_roa[selected_index]}")
+    print(f"Reached balancing RoA = {selected_min_reached_roa}")
 
 
 # PLOT MINIMUM STEPS TO RoA
@@ -655,7 +749,7 @@ ax.set_xlabel(r"$\dot{\theta}_k$ (rad/s)")
 ax.set_ylabel("Minimum walking steps to RoA")
 ax.set_title("Poincare States: Minimum Steps to Balancing RoA")
 ax.legend()
-fig.savefig(output_dir/"04_minimum_steps_to_roa.png",dpi=300)
+fig.savefig(output_dir/"minimum_steps_to_roa.png",dpi=300)
 plt.close(fig)
 
 
@@ -668,46 +762,43 @@ ax.set_xlabel(r"$\dot{\theta}_k$ (rad/s)")
 ax.set_ylabel("Maximum viable walking steps to RoA")
 ax.set_title("Poincare States: Maximum Viable Steps to Balancing RoA")
 ax.legend()
-fig.savefig(output_dir/"05_maximum_steps_to_roa.png",dpi=300)
+fig.savefig(output_dir/"maximum_steps_to_roa.png",dpi=300)
 plt.close(fig)
 
 
 # PLOT ORIGINAL WALKING TRAJECTORY
-plot_poincare_trajectory(np.array(poincare_history),output_dir/"06_original_walking_poincare_trajectory.png","Poincare Walking Trajectory: Original Initial Condition")
+plot_poincare_trajectory(np.array(poincare_history), output_dir / "original_walking_poincare_trajectory.png", "Poincare Walking Trajectory: Original Initial Condition")
+
+# PLOT SELECTED MINIMUM-STEP WALKING TRAJECTORY
+if selected_initial_state is not None:
+    plot_poincare_trajectory(np.array(selected_min_poincare_history), output_dir / "three_step_walking_poincare_trajectory.png", "Poincare Walking Trajectory: Selected 3+ Step Initial Condition")
 
 
 # GENERATE ORIGINAL WALKING GIF
 if len(state_history) > 1:
-    generate_walking_gif(initial_state,alpha_history,params,output_dir/"07_original_walker.gif",timestep=timestep)
+    generate_walking_gif(initial_state, alpha_history, params, output_dir / "original_walker.gif", timestep=timestep)
 
-# Longest Viable Trajectory - still tweaking!
-"""
+
 # RUN LONGEST VIABLE TRAJECTORY
-selected_history=[]
-selected_alpha_history=[]
-selected_poincare_history=[]
-selected_completed_steps=0
-selected_reached_roa=False
+selected_max_history = []
+selected_max_alpha_history = []
+selected_max_poincare_history = []
+selected_max_completed_steps = 0
+selected_max_reached_roa = False
 
 if selected_initial_state is not None:
+
     print("BEGINNING LONGEST VIABLE WALKING SIMULATION")
-    (selected_history,selected_alpha_history,selected_poincare_history,selected_completed_steps,selected_reached_roa)=simulate_policy(selected_initial_state,params,theta_dot_grid,alpha_grid,policy_alpha,steps_to_roa,maximum_steps_to_roa,max_walking_steps=max_walking_steps,timestep=timestep,use_max_policy=True)
+    ( selected_max_history, selected_max_alpha_history, selected_max_poincare_history, selected_max_completed_steps, selected_max_reached_roa) = simulate_policy(selected_initial_state, params, theta_dot_grid, alpha_grid, policy_alpha, steps_to_roa, maximum_steps_to_roa, max_walking_steps=max_walking_steps, timestep=timestep, use_max_policy=True)
 
     print("LONGEST VIABLE WALKING RESULT")
-    print(f"Number of walking steps = {selected_completed_steps}")
-    print(f"Reached balancing RoA = {selected_reached_roa}")
+    print(f"Initial theta_dot = {selected_initial_state[1]:.6f} rad/s")
+    print(f"Number of walking steps = {selected_max_completed_steps}")
+    print(f"Lookup-table maximum viable steps = {maximum_steps_to_roa[selected_index]}")
+    print(f"Reached balancing RoA = {selected_max_reached_roa}")
 
-    plot_poincare_trajectory(np.array(selected_poincare_history),output_dir/"08_three_step_walking_poincare_trajectory.png","Poincare Walking Trajectory: 3+ Step Initial Condition")
-    generate_walking_gif(selected_initial_state,selected_alpha_history,params,output_dir/"09_three_step_walker.gif",timestep=timestep)
+    # PLOT MAXIMUM-STEP WALKING TRAJECTORY
+    plot_poincare_trajectory( np.array(selected_max_poincare_history), output_dir / "longest_viable_trajectory.png", "Longest Viable Walking Trajectory Before RoA")
 
-    #plot maximum-step trajectory separately
-    fig, ax=plt.subplots(figsize=(8,6),layout="constrained")
-    ax.plot(range(len(selected_poincare_history)),selected_poincare_history,marker="o")
-    for k, velocity in enumerate(selected_poincare_history):
-        ax.annotate(f"{velocity:.2f}",(k,velocity),xytext=(5,5),textcoords="offset points")
-    ax.set_xlabel("Poincare step $k$")
-    ax.set_ylabel(r"$\dot{\theta}_k$ (rad/s)")
-    ax.set_title("Longest Viable Walking Trajectory Before RoA")
-    fig.savefig(output_dir/"10_longest_viable_trajectory.png",dpi=300)
-    plt.close(fig)
-"""
+    # GENERATE MAXIMUM-STEP WALKING GIF
+    generate_walking_gif( selected_initial_state, selected_max_alpha_history, params, output_dir / "longest_walker.gif", timestep=timestep)

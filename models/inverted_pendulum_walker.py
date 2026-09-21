@@ -15,7 +15,7 @@ def generate_params():
         "gravity": 9.81,  # gravity m/s^2)
         "length": 1,  # rod length (m)
         "mass": 1,  # point mass at end of rod (kg)
-        "damping_coeff": 0.1,  # damping coefficient (kg*m^2/s) - shouldn't need it
+        "damping_coeff": 0.0,  # damping coefficient (kg*m^2/s) - shouldn't need it
         "ankle_torque": 0.0,  # optional ankle torque (N m) - control input
         "incline": .06, #slope of ground
         "angle_of_attack": np.pi/8 #alpha
@@ -23,7 +23,7 @@ def generate_params():
     return params
 
 
-def dynamics(t, state, params):
+def evaluate_dynamics(t, state, params):
     #verbatim from rimless_wheel
     gravity = params["gravity"]
     length = params["length"]
@@ -73,34 +73,6 @@ def event_guard(previous_state, next_state, params):
     next_event=theta_next-theta_td
 
     return (prev_event <=0 and next_event>=0) #returns boolean, if threshold is passed
-
-
-def torque_policy(state, params):
-    theta=state[0]
-    theta_dot=state[1]
-
-    controller_torque=-2*theta-.5*theta_dot
-
-    _, _, tau_min, tau_max=get_control_bounds(params)
-
-    #clips so that it is always within bound
-    torque=np.clip(controller_torque, tau_min, tau_max)
-
-    return torque
-
-
-def angle_of_attack_policy(state, params):
-    theta=state[0]
-    theta_dot=state[1]
-
-    controller_alpha=np.pi/8
-
-    aot_min, aot_max, __, __=get_control_bounds(params)
-
-    alpha=np.clip(controller_alpha,aot_min,aot_max)
-
-    return(alpha)
-
 
 def event_dynamics(state, params):
     alpha=params["angle_of_attack"]
