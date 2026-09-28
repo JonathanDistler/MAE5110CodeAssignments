@@ -1,14 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-""""
-prediction; I expect the total energy to be the same throughout
-I also expect there to be sinusoids for kinetic energy and potential energy that are offset by 90 degrees
-such that the maximum of one is the minima of the other 
-"""
-
 from models import pendulum as model
-from explicit_euler import integrate as rk4
+from integrators import rk4 as integrator #change this to correct import 
 
 # Basic simulation of the pendulum
 
@@ -32,7 +26,7 @@ sim_time = 5.0
 flag=True
 while (timestep<2 and flag):
     #just used the same name as the initial euler file I had made, in the future I would change the python file name from explicit_euler to something else
-    time_traj,state_traj=rk4(model.dynamics, initial_state,timestep,sim_time,params)
+    time_traj,state_traj=integrator(model.dynamics, initial_state,timestep,sim_time,params)
 
     #calculates energy with a model library? probably where negative KE comes from (switched the order to fix)
     kinetic_energy, potential_energy = model.calculate_energy(state_traj, params)
