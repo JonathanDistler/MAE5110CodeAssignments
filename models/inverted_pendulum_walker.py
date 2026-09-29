@@ -1,16 +1,8 @@
-"""InvertedPendulumWalker starter model, with visualization provided.
-
-Implement the model functions for Assignment 2. The visualizer works independently
-of those functions; it draws a supplied state without advancing the simulation.
-"""
-
 import matplotlib.pyplot as plt
 import numpy as np
 
 
 def generate_params():
-    #change gamma to be incline
-    #alpha to be angle_of_attach
     params = {
         "gravity": 9.81,  # gravity m/s^2)
         "length": 1,  # rod length (m)
