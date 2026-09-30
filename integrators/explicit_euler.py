@@ -9,6 +9,14 @@ def explicit_euler(
     event_dynamics=lambda state, params: state,
     TIMESTEP_MODIFIER=1e-2,
 ):
+    """Integrate a trajectory, or take one step with (dynamics, time, state, dt, params)"""
+    if callable(timestep):
+        step_dynamics, time, state, dt = timestep, sim_time, x0, dynamics
+        if dt <= 0:
+            raise ValueError("timestep must be positive")
+        state = np.asarray(state, dtype=float)
+        return state + dt * step_dynamics(time, state, params)
+
     if timestep <= 0:
         raise ValueError("timestep must be positive")
 

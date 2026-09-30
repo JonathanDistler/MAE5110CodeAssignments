@@ -1,3 +1,6 @@
+#could be worthwhile explaining what the matplotlib.lines do
+#also, it is easier as a review to have everything in assignment_2, not the inverted_pendulum.py file
+#also, it is difficult if you don't push the RoA data, it took ~ 20 minutes to generate everything which is a long time to test the code sequence 
 from pathlib import Path
 import sys
 import matplotlib.pyplot as plt
@@ -9,7 +12,7 @@ from models import inverted_pendulum_walker as model
 from matplotlib.lines import Line2D
 
 
-# CALCULATE CONTROLLER ROA IF A DATA FILE IS NOT ALREADY SAVED ###########################################################
+# CALCULATE CONTROLLER ROA IF A DATA FILE IS NOT ALREADY SAVED 
 roa_path = Path("output/assignment_2/roa.npz")
 if roa_path.exists():
     print("Extracting ROA data...")
@@ -20,8 +23,8 @@ if roa_path.exists():
 else:
     print("No ROA data found, generating now...")
     params = model.generate_params()
-    params["K_p"] = 10
-    params["K_d"] = 10
+    params["K_p"] = 100
+    params["K_d"] = 200
     # Calculate ROA
     fig,ax,classification_grid, theta_values, theta_dot_values = model.plot_controller_roa(
         (params["incline"]-params["angle_of_attack"], params["incline"]+params["angle_of_attack"]),
@@ -34,13 +37,13 @@ else:
     np.savez(roa_path,classification_grid=classification_grid,theta_values=theta_values,theta_dot_values=theta_dot_values)
     fig.savefig("output/assignment_2/controller_roa.png",dpi=300,bbox_inches="tight")
 
-# Run a specific trial #######################################################################################################
+# Run a specific trial
 params = model.generate_params()
 timestep = 1e-3
 sim_time = 5
 sim_steps = int(sim_time / timestep)
 state_traj = np.zeros((sim_steps+1,2))
-x0 = [0,3]
+x0 = model.generate_initial_condition() #to tie in directly with the inverted_pendulum_walker.py 
 state_traj[0,:] = x0
 current_state = x0.copy()
 time_traj = np.linspace(0,sim_time,sim_steps+1)
@@ -85,7 +88,7 @@ fig.savefig("output/assignment_2/phase_portrait.png", dpi=200, bbox_inches="tigh
 plt.show()
 plt.close()
 
-# CREATE LOOKUP TABLE #######################################################################################################
+# CREATE LOOKUP TABLE
 base_params = model.generate_params()
 gravity = base_params["gravity"]
 length = base_params["length"]
@@ -121,7 +124,7 @@ for velocity_index, theta_dot_0 in enumerate(theta_dot_values_poincare):
 print(f"Next-velocity lookup table:\n {lookup_table}")
 print("Lookup table legend: \n -100 Indicates ROA is reached \n nan indicates the poincare section was not hit again \n All other numbers indicate the next velocity")
 
-# Going from lookup table to paths #########################################################################################################################################
+# Going from lookup table to paths
 
 # First, we must go from our velocities and controls to our actual labels
 def control_to_label(control, control_inputs):
@@ -191,7 +194,7 @@ for target_name, table_value in targets.items():
 
 # These dictionaries provide all possible paths we found. For example, path_dict[10] provides all paths starting at 10, and then backtrack to all other nodes that are connected
 
-# Plotting Section ##################################################################################################
+# Plotting Section
 # Create labels
 velocity = {
     node: float(value)

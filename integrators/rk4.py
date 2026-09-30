@@ -2,7 +2,7 @@ import numpy as np
 
 
 def _rk4_step(time, state, timestep, dynamics, params):
-    """Perform one RK4 integration step."""
+    """Perform one RK4 integration step"""
     k1 = dynamics(time, state, params)
     k2 = dynamics(time + timestep / 2,state + k1 * timestep / 2,params,)
     k3 = dynamics(time + timestep / 2,state + k2 * timestep / 2,params,)
@@ -20,6 +20,14 @@ def rk4(
     event_dynamics=lambda state, params: state,
     TIMESTEP_MODIFIER=1e-2,
 ):
+    """Integrate a trajectory, or take one step with (dynamics, time, state, dt, params)"""
+    if callable(timestep):
+        step_dynamics, time, state, dt = timestep, sim_time, x0, dynamics
+        if dt <= 0:
+            raise ValueError("timestep must be positive")
+        state = np.asarray(state, dtype=float)
+        return _rk4_step(time, state, dt, step_dynamics, params)
+
     if timestep <= 0:
         raise ValueError("timestep must be positive")
 

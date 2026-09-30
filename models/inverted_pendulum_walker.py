@@ -1,9 +1,3 @@
-"""InvertedPendulumWalker starter model, with visualization provided.
-
-Implement the model functions for Assignment 2. The visualizer works independently
-of those functions; it draws a supplied state without advancing the simulation.
-"""
-
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
@@ -17,9 +11,7 @@ from integrators.rk4 import _rk4_step
 
 
 def generate_params():
-    """
-    Generates useful parameters
-    """
+    # Generates useful parameters - had to remove density
     params = {
         "gravity": 9.81,  # gravity m/s^2)
         "length": 1,  # rod length (m)
@@ -33,19 +25,13 @@ def generate_params():
     }
     return params
 
+# shoudl return the initial angle and angular velocity - can be changed arbitrarily 
+def generate_initial_condition():
+    # Zero angle is upright; forward velocity initiates a walking step.
+    return np.array([0.0, 0.8])
 
+# calculates the dynamics for the wheel - returns a state derivative of [theta_dot, theta_double_dot]
 def dynamics(t, state, params):
-    """
-    Calculates the dynamics x_dot = [theta_dot, theta_ddot] for a spokeless wheel
-    
-    args:
-        t: time, ununsed since these dynamics are autonomous
-        state: Contains the state x=[theta,theta_dot] where theta = 0 is the vertical axis
-        params: useful parameters including gravity, length of the spokes, and angle of the axis (incline).
-
-    Returns: 
-        state_derivative: array of the derivative [theta_dot, theta double dot]
-    """
     gravity = params["gravity"]
     length = params["length"]
     ankle_torque = params["ankle_torque"]
@@ -101,6 +87,44 @@ def event_dynamics(state, params):
 
     return np.array([theta, theta_dot])
 
+
+def advance_step(time, state, timestep, params):
+    """Integrate to touchdown, reset, then integrate the remaining time.
+
+    Return the next state, contact count, and stance-foot displacement.
+    """
+    current = np.asarray(state, dtype=float).copy()
+    remaining = timestep
+    displacement = np.zeros(2)
+    contacts = 0
+    while remaining > 0:
+        candidate = _rk4_step(time, current, remaining, dynamics, params)
+        if not event_guard(current, candidate, params):
+            return candidate, contacts, displacement
+        lower, upper = 0.0, remaining
+        for _ in range(40):
+            midpoint = (lower + upper) / 2
+            trial = _rk4_step(time, current, midpoint, dynamics, params)
+            if event_guard(current, trial, params):
+                upper = midpoint
+            else:
+                lower = midpoint
+        contact = _rk4_step(time, current, upper, dynamics, params)
+        direction = 1 if contact[1] > 0 else -1
+        alpha = params["angle_of_attack"]
+        contact[0] = params["incline"] + direction * alpha
+        new_angle = contact[0] - direction * 2 * alpha
+        displacement += params["length"] * np.array([
+            np.sin(contact[0]) - np.sin(new_angle),
+            np.cos(contact[0]) - np.cos(new_angle),
+        ])
+        current = event_dynamics(contact, params)
+        contacts += 1
+        time += upper
+        remaining -= upper
+    return current, contacts, displacement
+
+# verbatim from the first assignment (0)
 def calculate_energy(state, params):
     gravity = params["gravity"]
     length = params["length"]
@@ -114,6 +138,7 @@ def calculate_energy(state, params):
 
     return kinetic_energy, potential_energy
 
+# not really needed, but a good thing to keep in 
 def calculate_torque(state,params):
     mass = params["mass"]
     gravity = params["gravity"]
@@ -123,6 +148,7 @@ def calculate_torque(state,params):
     tau_lower_bound = -0.1*mass*gravity*length
     tau_upper_bound = 0.05*mass*gravity*length  
     new_ankle_torque = -mass*gravity*length*np.sin(state[0])-K_p*state[0]-K_d*state[1]
+    # good clip
     return np.clip(new_ankle_torque,tau_lower_bound,tau_upper_bound)
 
 def plot_controller_roa(theta_limits,theta_dot_limits,n_theta,n_theta_dot,params,sim_time,timestep,show=False):    
@@ -324,8 +350,6 @@ def plot_phase_portrait(classification_grid, theta_values, theta_dot_values, sta
 
     return fig, ax
 
-#####################################################################################################################
-
 from collections import Counter, defaultdict
 from math import log2, sqrt
 
@@ -337,7 +361,7 @@ from matplotlib.patches import FancyArrowPatch
 
 
 def _token(value):
-    """Create a hashable identity for scalar or array-like values."""
+    #creates a hashable identity for scalar or array-like values
     if isinstance(value, np.generic):
         value = value.item()
     try:
@@ -345,7 +369,6 @@ def _token(value):
         return type(value).__qualname__, value
     except TypeError:
         return type(value).__qualname__, repr(value)
-
 
 def _display(value, label_source):
     """Return (display_text, customized) for a mapping, callable, or None."""
@@ -432,7 +455,7 @@ def _hierarchical_positions(
     vertical_spacing,
 ):
     """
-    Place directed edges left-to-right.
+    Place directed edges left-to-right
 
     Strongly connected components are collapsed only for layout calculation,
     so graphs containing cycles still work while every real node remains visible.
@@ -1193,19 +1216,20 @@ def visualize(
     return ax
 
 
-def animate(state_traj,time_traj,params,timestep,completed_steps):
+def animate(state_traj,time_traj,params,timestep,completed_steps,stance_traj=None):
     fig, ax = plt.subplots(figsize=(8, 5), layout="constrained")
 
 
     def draw_frame(index):
         # The massless swing leg is repositioned instantaneously at each impact.
-        visualize(state_traj[:, index], params, ax=ax)
+        foot = (0.0, 0.0) if stance_traj is None else stance_traj[:, index]
+        visualize(state_traj[:, index], params, ax=ax, stance_position=foot)
         ax.set_title(f"t = {time_traj[index]:.2f} s")
 
 
     # Simulate at a small timestep, but render only 25 frames per second.
     fps = 25
-    frame_stride = round(1 / (fps * timestep))
+    frame_stride = max(1, round(1 / (fps * timestep)))
     frame_indices = list(range(0, time_traj.size, frame_stride))
     if frame_indices[-1] != time_traj.size - 1:
         frame_indices.append(time_traj.size - 1)
