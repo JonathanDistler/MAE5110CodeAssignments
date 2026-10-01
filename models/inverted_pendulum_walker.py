@@ -26,9 +26,26 @@ def generate_params():
     return params
 
 # shoudl return the initial angle and angular velocity - can be changed arbitrarily 
-def generate_initial_condition():
+def generate_initial_condition(params=None):
     # Zero angle is upright; forward velocity initiates a walking step.
-    return np.array([0.0, 0.8])
+    state = np.array([0.0, 0.8])
+    validate_initial_condition(state, generate_params() if params is None else params)
+    return state
+
+#new function that I added so that the pendulum doesn't spawn beneath the incline - unphysical behavior
+def validate_initial_condition(state, params):
+    #Reject poses with a leg below the ramp before integration
+    state = np.asarray(state, dtype=float)
+    if state.shape != (2,) or not np.all(np.isfinite(state)):
+        raise ValueError("state must contain two finite values: [theta, velocity].")
+    alpha, incline = params["angle_of_attack"], params["incline"]
+    if not np.isfinite(alpha) or not 0 < alpha < np.pi / 2:
+        raise ValueError("angle_of_attack must be between zero and pi/2.")
+    if not np.isfinite(incline) or abs(incline) >= np.pi / 2:
+        raise ValueError("incline must be finite and between -pi/2 and pi/2.")
+    if abs(state[0] - incline) > alpha + 1e-12:
+        raise ValueError("Initial angle places a leg below the ground plane.")
+
 
 # calculates the dynamics for the wheel - returns a state derivative of [theta_dot, theta_double_dot]
 def dynamics(t, state, params):
@@ -57,12 +74,12 @@ def event_guard(previous_state, next_state, params):
     next_relative = next_theta - incline
 
     forward_collision = (
-        previous_relative < alpha <= next_relative
+        previous_relative <= alpha <= next_relative
         and next_theta_dot > 0
     )
 
     backward_collision = (
-        previous_relative > -alpha >= next_relative
+        previous_relative >= -alpha >= next_relative
         and next_theta_dot < 0
     )
 
@@ -93,6 +110,9 @@ def advance_step(time, state, timestep, params):
 
     Return the next state, contact count, and stance-foot displacement.
     """
+    validate_initial_condition(state, params)
+    if not np.isfinite(timestep) or timestep <= 0:
+        raise ValueError("timestep must be finite and positive.")
     current = np.asarray(state, dtype=float).copy()
     remaining = timestep
     displacement = np.zeros(2)
