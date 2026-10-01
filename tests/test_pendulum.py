@@ -4,8 +4,6 @@ from integrators import rk4
 from models import pendulum as model
 
 
-
-
 def test_energy_conservation():
     params = model.generate_params()
     # Energy is conserved only without damping or external torque.
@@ -51,9 +49,6 @@ def test_energy_loss():
     total_energy=kinetic_energy + potential_energy
     difference=(total_energy[-1]-total_energy[0])
     assert (not(total_energy[-1]==pytest.approx(total_energy[0])) and difference<0) #tests if the energy is lost, in this case a sizable amount
-
-
-
 
 def test_torque():
     params=model.generate_params()

@@ -1,6 +1,4 @@
 #could be worthwhile explaining what the matplotlib.lines do
-#also, it is easier as a review to have everything in assignment_2, not the inverted_pendulum.py file
-#also, it is difficult if you don't push the RoA data, it took ~ 20 minutes to generate everything which is a long time to test the code sequence 
 from pathlib import Path
 import sys
 import matplotlib.pyplot as plt
@@ -10,6 +8,79 @@ from integrators.rk4 import _rk4_step
 from matplotlib.animation import FuncAnimation, PillowWriter
 from models import inverted_pendulum_walker as model
 from matplotlib.lines import Line2D
+
+
+def get_control_bounds(params):
+    mass = params["mass"]
+    gravity = params["gravity"]
+    length = params["length"]
+    lower_torque = -0.1 * mass * gravity * length
+    upper_torque = 0.05 * mass * gravity * length
+    lower_angle = np.arcsin(-upper_torque / (mass * gravity * length))
+    upper_angle = np.arcsin(-lower_torque / (mass * gravity * length))
+    return lower_angle, upper_angle, lower_torque, upper_torque
+
+
+def capture_bounds(theta, params):
+    # Integrate the maximum braking acceleration to each limiting equilibrium.
+    lower_angle, upper_angle, lower_torque, upper_torque = get_control_bounds(params)
+    gravity = params["gravity"]
+    length = params["length"]
+    inertia = params["mass"] * length**2
+    lower_energy = gravity / length * (np.cos(lower_angle) - np.cos(theta))
+    lower_energy += upper_torque / inertia * (theta - lower_angle)
+    upper_energy = gravity / length * (np.cos(upper_angle) - np.cos(theta))
+    upper_energy += lower_torque / inertia * (theta - upper_angle)
+    return -np.sqrt(max(0.0, 2 * lower_energy)), np.sqrt(max(0.0, 2 * upper_energy))
+
+
+def state_is_in_roa(state, params):
+    theta, theta_dot = state
+    lower_angle, upper_angle, _, _ = get_control_bounds(params)
+    lower_velocity, upper_velocity = capture_bounds(theta, params)
+    return lower_angle < theta < upper_angle and lower_velocity < theta_dot < upper_velocity
+
+
+def feedback_linearization_controller(state, params):
+    theta, theta_dot = state
+    _, _, lower_torque, upper_torque = get_control_bounds(params)
+    inertia = params["mass"] * params["length"]**2
+    gravity_torque = params["mass"] * params["gravity"] * params["length"]
+    # Brake along the constant-torque trajectory that ends at upright rest.
+    braking_torque = lower_torque if theta < 0 else upper_torque
+    energy = params["gravity"] / params["length"] * (1 - np.cos(theta))
+    energy += braking_torque / inertia * theta
+    target_velocity = -np.sign(theta) * np.sqrt(max(0.0, 2 * energy))
+    if abs(theta) < 0.005 and abs(theta_dot) < 0.02:
+        torque = -gravity_torque * np.sin(theta) - inertia * (10 * theta + 5 * theta_dot)
+    else:
+        torque = upper_torque if theta_dot < target_velocity else lower_torque
+    return np.clip(torque, lower_torque, upper_torque)
+
+
+def simulate_balance(state, params, timestep=0.001, sim_time=20.0):
+    model.validate_initial_condition(state, params)
+    if not np.isfinite(timestep) or timestep <= 0:
+        raise ValueError("timestep must be finite and positive.")
+    current_state = np.asarray(state, dtype=float).copy()
+    history = [current_state.copy()]
+    # Evaluate feedback at every RK4 stage without changing the caller's params.
+    def controlled_dynamics(state):
+        current_params = params.copy()
+        current_params["ankle_torque"] = feedback_linearization_controller(state, params)
+        return model.dynamics(0.0, state, current_params)
+
+    for step in range(int(sim_time / timestep)):
+        k1 = controlled_dynamics(current_state)
+        k2 = controlled_dynamics(current_state + timestep * k1 / 2)
+        k3 = controlled_dynamics(current_state + timestep * k2 / 2)
+        k4 = controlled_dynamics(current_state + timestep * k3)
+        current_state += timestep * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+        history.append(current_state.copy())
+        model.validate_initial_condition(current_state, params)
+        if np.max(np.abs(current_state)) < 1e-8:
+            break
+    return np.asarray(history)
 
 
 # CALCULATE CONTROLLER ROA IF A DATA FILE IS NOT ALREADY SAVED 

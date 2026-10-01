@@ -28,7 +28,7 @@ def generate_params():
 
 
 def generate_initial_condition():
-    """Start near a passive downhill gait for the default parameters."""
+    """Start near a passive downhill gait for the default parameters"""
     return np.array([0.0, 0.0, 0.4, -2.0])
 
 
@@ -48,7 +48,7 @@ def calculate_mass_matrix(state, params):
 
 
 def dynamics(t, state, params):
-    """Evaluate M(q) qddot + C(q, qdot) qdot = gravity + [-torque, torque]."""
+    """Evaluate M(q) qddot + C(q, qdot) qdot = gravity + [-torque, torque]"""
     stance_angle, swing_angle, stance_velocity, swing_velocity = state
     gravity = params["gravity"]
     length = params["length"]
@@ -89,12 +89,8 @@ def event_guard(previous_state, next_state, params):
 
 
 def event_dynamics(state, params):
-    """Apply a plastic, no-slip impact at touchdown, then exchange the legs.
+    """Apply a plastic, no-slip impact at touchdown, then exchange the legs"""
 
-    The old stance foot lifts without an impulse. Momentum conservation gives
-    M_post @ new_velocities = momentum_transfer @ old_velocities. With identical
-    legs, exchanging the angles leaves the mass matrix unchanged.
-    """
     stance_angle, swing_angle = state[:2]
     length = params["length"]
     hip_mass = params["hip_mass"]
@@ -116,7 +112,7 @@ def event_dynamics(state, params):
 
 
 def calculate_energy(state, params):
-    """Return kinetic and potential energy relative to the current stance foot."""
+    """Return kinetic and potential energy relative to the current stance foot"""
     stance_angle, swing_angle = state[:2]
     velocities = np.asarray(state[2:])
     length = params["length"]
@@ -144,17 +140,23 @@ def calculate_positions(state, params):
     return hip, swing_foot
 
 
+def validate_initial_condition(state, params):
+    state = np.asarray(state, dtype=float)
+    if state.shape != (4,) or not np.all(np.isfinite(state)):
+        raise ValueError("state must contain four finite angles and velocities.")
+    hip, swing_foot = calculate_positions(state, params)
+    normal = np.array([np.sin(params["incline"]), np.cos(params["incline"])])
+    if hip @ normal < -1e-12 or swing_foot @ normal < -1e-12:
+        raise ValueError("Initial angle places a leg below the ground plane.")
+
+
 def ground_guard_value(state, params):
-    """Nonnegative at first hip-ground contact; angles are not wrapped."""
+    """Nonnegative at first hip-ground contact; angles are not wrapped"""
     return abs(state[0] - params["incline"]) - np.pi / 2
 
 
 def visualize(state, params, ax=None, *, stance_position=(0.0, 0.0), view_limits=None):
-    """Draw the nominal straight legs and point masses; return the axes.
-
-    The view follows the stance foot unless fixed view_limits are supplied.
-    The idealized swing-foot retraction is not drawn.
-    """
+    """Draw the nominal straight legs and point masses; return the axes"""
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 5), layout="constrained")
     ax.clear()

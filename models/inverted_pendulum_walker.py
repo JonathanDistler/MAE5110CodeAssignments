@@ -43,7 +43,7 @@ def validate_initial_condition(state, params):
         raise ValueError("angle_of_attack must be between zero and pi/2.")
     if not np.isfinite(incline) or abs(incline) >= np.pi / 2:
         raise ValueError("incline must be finite and between -pi/2 and pi/2.")
-    if abs(state[0] - incline) > alpha + 1e-12:
+    if abs(state[0] - incline) > np.pi / 2 + 1e-12:
         raise ValueError("Initial angle places a leg below the ground plane.")
 
 
@@ -105,11 +105,12 @@ def event_dynamics(state, params):
     return np.array([theta, theta_dot])
 
 
-def advance_step(time, state, timestep, params):
+def advance_step(time, state, timestep, params, dynamics_function=None):
     """Integrate to touchdown, reset, then integrate the remaining time.
 
     Return the next state, contact count, and stance-foot displacement.
     """
+    dynamics_function = dynamics if dynamics_function is None else dynamics_function
     validate_initial_condition(state, params)
     if not np.isfinite(timestep) or timestep <= 0:
         raise ValueError("timestep must be finite and positive.")
@@ -118,18 +119,18 @@ def advance_step(time, state, timestep, params):
     displacement = np.zeros(2)
     contacts = 0
     while remaining > 0:
-        candidate = _rk4_step(time, current, remaining, dynamics, params)
+        candidate = _rk4_step(time, current, remaining, dynamics_function, params)
         if not event_guard(current, candidate, params):
             return candidate, contacts, displacement
         lower, upper = 0.0, remaining
         for _ in range(40):
             midpoint = (lower + upper) / 2
-            trial = _rk4_step(time, current, midpoint, dynamics, params)
+            trial = _rk4_step(time, current, midpoint, dynamics_function, params)
             if event_guard(current, trial, params):
                 upper = midpoint
             else:
                 lower = midpoint
-        contact = _rk4_step(time, current, upper, dynamics, params)
+        contact = _rk4_step(time, current, upper, dynamics_function, params)
         direction = 1 if contact[1] > 0 else -1
         alpha = params["angle_of_attack"]
         contact[0] = params["incline"] + direction * alpha
@@ -675,36 +676,8 @@ def plot_path_graph(
 ):
     """
     Plot selected path-dictionary entries as one directed graph.
-
-    Shared state IDs are represented by one node across all selected keys when
-    merge_shared_nodes=True. For example, if paths under keys 10, 11, and 12 all
-    visit state 25, the figure contains one node 25 with all relevant edges.
-
-    node_label_mode may be "id", "value", or "both". When omitted, the old
-    behavior is preserved: mapped values are shown when node_labels is supplied;
-    otherwise node IDs are shown. Explicit node_label_mode overrides the older
-    show_node_ids option.
-
-    Increase horizontal_spacing and vertical_spacing if the plot is still dense.
-    Set show_edge_labels=False to keep colored edges and the legend while hiding
-    inline control labels.
-    layout="spring" creates a general force-directed graph based only on which
-    states connect. Other options are "kamada_kawai", "circular", and the older
-    left-to-right "hierarchical" layout. Increase spring_spacing for a looser
-    spring graph. For hierarchical layout, use horizontal_spacing and
-    vertical_spacing instead. Set show_edge_labels=False to keep colored edges
-    and the legend while hiding inline control labels.
-
-    count_repeated_edges=False treats repeated appearances of the same
-    source/control/target transition as one physical graph edge. This is the
-    recommended setting when paths were expanded from a transition table.
-
-    terminal_node_styles=None applies default green/red styles to raw states
-    "ROA" and "FAILURE". Pass {} to disable terminal styling or supply a
-    mapping from terminal state to draw_networkx_nodes keyword overrides.
-
-    Returns (fig, ax, graph).
     """
+    
     records = _validate_records(path_dict, control_path_dict, keys)
 
     if node_colors is None:

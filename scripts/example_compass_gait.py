@@ -1,3 +1,6 @@
+# I believe that this matches exactly with the marimo notebook aside from the "import marimo as mo"
+# and this import doesn't actually get called anywhere
+# and the output only shows one frame - not all of the frames
 # %% [markdown]
 # # Compass-gait walker
 #

@@ -30,8 +30,10 @@ def test_spoke_collision(direction):
 @pytest.mark.parametrize("model", [rimless_wheel, inverted_pendulum_walker])
 def test_reject_initial_leg_penetration(model):
     params = model.generate_params()
+    limit = np.pi / params["N_spokes"] if model is rimless_wheel else np.pi / 2
+    angle = params["incline"] + limit + 0.01
     with pytest.raises(ValueError, match="ground plane"):
-        model.validate_initial_condition([1.0, 0.0], params)
+        model.validate_initial_condition([angle, 0.0], params)
 
 
 def test_compass_initial_angles_checked_geometrically():

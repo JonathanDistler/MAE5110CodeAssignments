@@ -38,7 +38,7 @@ upper = points.max(axis=0)
 
 # Build the transition matrix
 def step(state, torque):
-    """Advance one control interval with constant torque, wrapping the angle."""
+    """Advance one control interval with constant torque, wrapping the angle"""
     step_params = params.copy()
     step_params["torque"] = torque
     for substep in range(control_steps):
