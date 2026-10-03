@@ -50,3 +50,15 @@ def test_time_dependent_dynamics():
 
         # Integrating 2*t from t=1 to t=2 adds 3; Euler undershoots by 0.01.
         assert state == pytest.approx([6.0], rel=0, abs=0.02), name
+
+
+@pytest.mark.parametrize("integrator", [integrators.euler, integrators.rk4])
+def test_original_trajectory_interface(integrator):
+    initial = np.array([1.0, 4.0])
+    params = {"velocity": np.array([2.0, -3.0])}
+    times, states = integrator(
+        lambda time, state, params: params["velocity"], initial, 0.25, 1.0, params
+    )
+    assert times == pytest.approx(np.arange(5) * 0.25)
+    assert states == pytest.approx(initial[:, None] + params["velocity"][:, None] * times)
+    assert initial == pytest.approx([1.0, 4.0])

@@ -36,6 +36,25 @@ def evaluate_dynamics(t, state, params):
     return state_derivative
 
 
+# Keep the original name available to assignment scripts.
+dynamics = evaluate_dynamics
+
+
+def generate_initial_condition():
+    return np.array([0.0, 4.0])
+
+
+def validate_initial_condition(state, params):
+    """Reject a hub below the inclined ground plane (angles from vertical)."""
+    state = np.asarray(state, dtype=float)
+    if state.shape != (2,) or not np.all(np.isfinite(state)):
+        raise ValueError("state must contain two finite values: [theta, velocity].")
+    # Dot the stance leg with the upward ground normal; do not wrap angles.
+    relative_angle = state[0] - params["incline"]
+    if abs(relative_angle) > np.pi / 2:
+        raise ValueError("Starting angle places the walker below the ground plane.")
+
+
 def get_control_bounds(params):
     angle_of_attack_min=np.pi/8
     angle_of_attack_max=np.pi/7

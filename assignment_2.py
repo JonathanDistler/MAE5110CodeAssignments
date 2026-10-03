@@ -19,6 +19,7 @@ params = {
 }
 
 initial_state = np.array([0.0, 4.0])
+model.validate_initial_condition(initial_state, params)
 timestep = 1e-4
 sim_time = 3.0
 
@@ -459,7 +460,7 @@ def integrate_to_poincare(state, params, timestep=1e-4):
 
 
 def simulate_balance(state, params, timestep=1e-4, duration=20.0):
-    """Keep ankle control on and settle about the current stance foot."""
+    # Keep ankle control on and settle about the current stance foot
     balance_params = params.copy()
     history = []
     state = state.copy()
@@ -479,6 +480,7 @@ def simulate_balance(state, params, timestep=1e-4, duration=20.0):
 # SIMULATE A SPECIFIC POLICY
 def simulate_policy(initial_state, params, theta_dot_grid, alpha_grid, policy_alpha, steps_to_roa, maximum_steps_to_roa, max_walking_steps=20, timestep=1e-4, use_max_policy=False):
 
+    model.validate_initial_condition(initial_state, params)
     state=initial_state.copy()
     state_history=[state.copy()]
     alpha_history=[]
