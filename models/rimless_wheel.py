@@ -78,3 +78,7 @@ def calculate_momentum(state,params):
     theta_dot=state[1]
     L=mass*length**2*theta_dot
     return(L)
+
+
+def generate_initial_condition():
+    return np.array([0.0, 0.0])

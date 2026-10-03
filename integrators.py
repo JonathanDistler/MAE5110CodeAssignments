@@ -2,6 +2,19 @@ import numpy as np
 
 #from the wikipedia, h i sthe step, then there are four stages (four orders, maybe)
 def rk4(dynamics, initial_state, timestep, sim_time, params):
+    """Integrate a trajectory, or take one step with (dynamics, time, state, dt, params).
+
+    Array-valued third arguments select the single-step interface. The original
+    (dynamics, initial_state, timestep, sim_time, params) interface is preserved.
+    """
+    if np.ndim(timestep) > 0:
+        time, state, step = initial_state, np.asarray(timestep), sim_time
+        k1 = dynamics(time, state, params)
+        k2 = dynamics(time + step / 2, state + step * k1 / 2, params)
+        k3 = dynamics(time + step / 2, state + step * k2 / 2, params)
+        k4 = dynamics(time + step, state + step * k3, params)
+        return state + step / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+
     n_timesteps = int(sim_time / timestep) + 1
 
     time_traj = np.arange(n_timesteps) * timestep
@@ -20,6 +33,15 @@ def rk4(dynamics, initial_state, timestep, sim_time, params):
     return time_traj, state_traj
 
 def euler(dynamics, initial_state, timestep, sim_time, params):
+    """Integrate a trajectory, or take one step with (dynamics, time, state, dt, params).
+
+    Array-valued third arguments select the single-step interface. The original
+    (dynamics, initial_state, timestep, sim_time, params) interface is preserved.
+    """
+    if np.ndim(timestep) > 0:
+        time, state, step = initial_state, np.asarray(timestep), sim_time
+        return state + step * dynamics(time, state, params)
+
     n_timesteps = int(sim_time / timestep) + 1
 
     time_traj = np.arange(n_timesteps) * timestep
